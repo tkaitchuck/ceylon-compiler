@@ -2145,7 +2145,7 @@ public class ClassTransformer extends AbstractTransformer {
         boolean prevNoExpressionlessReturn = statementGen().noExpressionlessReturn;
         try {
             statementGen().noExpressionlessReturn = Decl.isMpl(model) || Strategy.useBoxedVoid(model);
-            body = statementGen().transform(block).getStatements();    
+            body = statementGen().transform(block).getStatements();
         } finally {
             statementGen().noExpressionlessReturn = prevNoExpressionlessReturn;
         }
