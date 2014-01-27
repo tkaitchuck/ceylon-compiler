@@ -17,50 +17,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  * MA  02110-1301, USA.
  */
-@noanno
-class Bug269() {
-    shared actual String string = "";
-    shared actual Integer hash = +0;
-}
+package com.redhat.ceylon.tools.copy;
 
-@noanno
-class Bug269_2() {
-    shared actual String string {
-        return "";
+import java.util.ResourceBundle;
+
+
+class CeylonCopyMessages extends com.redhat.ceylon.common.Messages {
+
+    public static final ResourceBundle RESOURCE_BUNDLE = ResourceBundle.getBundle(CeylonCopyMessages.class.getPackage().getName() + ".resources.messages");
+
+    public static String msg(String msgKey, Object... msgArgs) {
+        return msg(RESOURCE_BUNDLE, msgKey, msgArgs);
     }
-    shared actual Integer hash {
-        return +0;
-    }
-    void test(){
-        print(this.string);
-        print(this.hash);
-    }
-}
 
-@noanno
-void string(){
-    string();
-}
-
-@noanno
-void hash(){
-    hash();
-}
-
-@noanno
-void bug269() {
-    String string = "hello";
-    Integer hash = +0;
-    print(string);
-    print(hash);
-    print(Bug269().string);
-    print(Bug269().hash);
-}
-
-@noanno
-void bug269_2() {
-    void string(){}
-    void hash(){}
-    string();
-    hash();
 }
