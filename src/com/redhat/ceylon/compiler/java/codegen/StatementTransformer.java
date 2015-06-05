@@ -39,7 +39,9 @@ import com.redhat.ceylon.compiler.typechecker.tree.Tree;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.CaseClause;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.Condition;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.Expression;
+import com.redhat.ceylon.compiler.typechecker.tree.Tree.Return;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.SpecifierOrInitializerExpression;
+import com.redhat.ceylon.compiler.typechecker.tree.Tree.Statement;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.Switched;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.Variable;
 import com.redhat.ceylon.compiler.typechecker.tree.Visitor;
@@ -134,6 +136,9 @@ public class StatementTransformer extends AbstractTransformer {
     }
     
     public List<JCStatement> transformBlock(Tree.Block block) {
+        return transformBlock(block, false);
+    }
+    public List<JCStatement> transformBlock(Tree.Block block, boolean revertRet) {
         if (block == null) {
             return List.<JCStatement>nil();
         }
@@ -147,13 +152,26 @@ public class StatementTransformer extends AbstractTransformer {
             v.defs = new ListBuffer<JCTree>();
             v.inInitializer = false;
             v.classBuilder = current();
-            for (Tree.Statement stmt : block.getStatements()) {
-                HasErrorException error = errors().getFirstErrorBlock(stmt);
-                if (error == null) {
-                    stmt.visit(v);
+            java.util.Iterator<Statement> statements = block.getStatements().iterator();
+            while (statements.hasNext()) {
+                Tree.Statement stmt = statements.next();
+                Transformer<JCStatement, Return> returnTransformer;
+                if (revertRet 
+                        && stmt instanceof Tree.Declaration) {
+                    returnTransformer = returnTransformer(defaultReturnTransformer);
                 } else {
-                    v.append(this.makeThrowUnresolvedCompilationError(error));
-                    break;
+                    returnTransformer = this.returnTransformer;
+                }
+                try {
+                    HasErrorException error = errors().getFirstErrorBlock(stmt);
+                    if (error == null) {
+                        stmt.visit(v);
+                    } else {
+                        v.append(this.makeThrowUnresolvedCompilationError(error));
+                        break;
+                    }
+                } finally {
+                    returnTransformer(returnTransformer);
                 }
             }
             result = (List<JCStatement>)v.getResult().toList();
@@ -3155,30 +3173,59 @@ public class StatementTransformer extends AbstractTransformer {
         // continue;
         return at(stmt).Continue(getLabel(stmt));
     }
-
+    private Transformer<JCStatement, Tree.Return> defaultReturnTransformer = new DefaultReturnTransformer();
+    private Transformer<JCStatement, Tree.Return> returnTransformer = defaultReturnTransformer;
+    Transformer<JCStatement, Tree.Return> returnTransformer(Transformer<JCStatement, Tree.Return> tx) {
+        Transformer<JCStatement, Tree.Return> result = this.returnTransformer;
+        this.returnTransformer = tx;
+        return result;
+        
+    }
     JCStatement transform(Tree.Return ret) {
-        // Remove the inner substitutions for any deferred values specified 
-        // in the control block
-        closeInnerSubstituionsForSpecifiedValues(currentForClause);
-        Tree.Expression expr = ret.getExpression();
-        JCExpression returnExpr = null;
-        at(ret);
-        if (expr != null) {
-            boolean prevNoExpressionlessReturn = noExpressionlessReturn;
-            try {
-                noExpressionlessReturn = false;
-                // we can cast to TypedDeclaration here because return with expressions are only in Function or Value
-                TypedDeclaration declaration = (TypedDeclaration)ret.getDeclaration();
-                returnExpr = expressionGen().transformExpression(declaration, expr.getTerm());
-                // make sure all returns from hash are properly turned into ints
-                returnExpr = convertToIntIfHashAttribute(declaration, returnExpr);
-            } finally {
-                noExpressionlessReturn = prevNoExpressionlessReturn;
-            }
-        } else if (noExpressionlessReturn) {
-            returnExpr = makeNull();
+        return returnTransformer.transform(ret);
+    }
+    
+    class ConstructorReturnTransformer implements Transformer<JCStatement, Tree.Return> {
+        private final Name label;
+
+        public ConstructorReturnTransformer(Name label) {
+            this.label = label;
         }
-        return at(ret).Return(returnExpr);
+        
+        public JCStatement transform(Tree.Return ret) {
+            // Remove the inner substitutions for any deferred values specified 
+            // in the control block
+            closeInnerSubstituionsForSpecifiedValues(currentForClause);
+            at(ret);
+            return at(ret).Break(label);
+        }
+    }
+    
+    class DefaultReturnTransformer implements Transformer<JCStatement, Tree.Return> {
+        public JCStatement transform(Tree.Return ret) {
+            // Remove the inner substitutions for any deferred values specified 
+            // in the control block
+            closeInnerSubstituionsForSpecifiedValues(currentForClause);
+            Tree.Expression expr = ret.getExpression();
+            JCExpression returnExpr = null;
+            at(ret);
+            if (expr != null) {
+                boolean prevNoExpressionlessReturn = noExpressionlessReturn;
+                try {
+                    noExpressionlessReturn = false;
+                    // we can cast to TypedDeclaration here because return with expressions are only in Function or Value
+                    TypedDeclaration declaration = (TypedDeclaration)ret.getDeclaration();
+                    returnExpr = expressionGen().transformExpression(declaration, expr.getTerm());
+                    // make sure all returns from hash are properly turned into ints
+                    returnExpr = convertToIntIfHashAttribute(declaration, returnExpr);
+                } finally {
+                    noExpressionlessReturn = prevNoExpressionlessReturn;
+                }
+            } else if (noExpressionlessReturn) {
+                returnExpr = makeNull();
+            }
+            return at(ret).Return(returnExpr);
+        }
     }
 
     public JCStatement transform(Tree.Throw t) {
@@ -3562,7 +3609,7 @@ public class StatementTransformer extends AbstractTransformer {
         protected java.util.List<CaseClause> getCaseClauses(Tree.SwitchClause switchClause, Tree.SwitchCaseList caseList) {
             return caseList.getCaseClauses();
         }
-        protected JCStatement transformElse(Naming.SyntheticName selectorAlias, Tree.SwitchCaseList caseList, String tmpVar, Tree.Term outerExpression) {
+        protected JCStatement transformElse(Naming.SyntheticName selectorAlias, Tree.SwitchCaseList caseList, String tmpVar, Tree.Term outerExpression, boolean primitiveSelector) {
             Tree.ElseClause elseClause = caseList.getElseClause();
             if (elseClause != null) {
                 if (elseClause.getVariable() != null && selectorAlias != null) {
@@ -3574,34 +3621,42 @@ public class StatementTransformer extends AbstractTransformer {
                     TypedDeclaration varDecl = elseClause.getVariable().getDeclarationModel();
     
                     Naming.SyntheticName tmpVarName = selectorAlias;
-                    Name substVarName = naming.aliasName(name);
-    
-                    // Want raw type for instanceof since it can't be used with generic types
-                    JCExpression rawToTypeExpr = makeJavaType(varType, JT_NO_PRIMITIVES | JT_RAW);
-    
-                    // Substitute variable with the correct type to use in the rest of the code block
-                    
-                    JCExpression tmpVarExpr = at(elseClause).TypeCast(rawToTypeExpr, tmpVarName.makeIdent());
-                    JCExpression toTypeExpr;
-                    if (isCeylonBasicType(varType) && BooleanUtil.isTrue(varDecl.getUnboxed())) {
-                        toTypeExpr = makeJavaType(varType);
-                        tmpVarExpr = unboxType(tmpVarExpr, varType);
-                    } else {
-                        toTypeExpr = makeJavaType(varType, JT_NO_PRIMITIVES);
-                        if (BooleanUtil.isTrue(varDecl.getUnboxed())) {
-                            tmpVarExpr = boxType(tmpVarExpr, varType);
-                        } else if (varDecl.getOriginalDeclaration() != null && BooleanUtil.isTrue(varDecl.getOriginalDeclaration().getUnboxed())) {
-                            tmpVarExpr = boxType(tmpVarName.makeIdent(), varType);
+                    Name substVarName;
+                    List<JCStatement> stats;
+                    if(primitiveSelector){
+                        substVarName = tmpVarName.asName();
+                        stats = List.<JCStatement> nil();
+                    }else{
+                        substVarName = naming.aliasName(name);
+
+                        // Want raw type for instanceof since it can't be used with generic types
+                        JCExpression rawToTypeExpr = makeJavaType(varType, JT_NO_PRIMITIVES | JT_RAW);
+
+                        // Substitute variable with the correct type to use in the rest of the code block
+
+                        JCExpression tmpVarExpr = at(elseClause).TypeCast(rawToTypeExpr, tmpVarName.makeIdent());
+                        JCExpression toTypeExpr;
+                        if (isCeylonBasicType(varType) && BooleanUtil.isTrue(varDecl.getUnboxed())) {
+                            toTypeExpr = makeJavaType(varType);
+                            tmpVarExpr = unboxType(tmpVarExpr, varType);
+                        } else {
+                            toTypeExpr = makeJavaType(varType, JT_NO_PRIMITIVES);
+                            if (BooleanUtil.isTrue(varDecl.getUnboxed())) {
+                                tmpVarExpr = boxType(tmpVarExpr, varType);
+                            } else if (varDecl.getOriginalDeclaration() != null && BooleanUtil.isTrue(varDecl.getOriginalDeclaration().getUnboxed())) {
+                                tmpVarExpr = boxType(tmpVarName.makeIdent(), varType);
+                            }
                         }
+
+                        // The variable holding the result for the code inside the code block
+                        JCVariableDecl decl2 = at(elseClause).VarDef(make().Modifiers(FINAL), substVarName, toTypeExpr, tmpVarExpr);
+                        
+                        stats = List.<JCStatement> of(decl2);
                     }
-                    
-                    // The variable holding the result for the code inside the code block
-                    JCVariableDecl decl2 = at(elseClause).VarDef(make().Modifiers(FINAL), substVarName, toTypeExpr, tmpVarExpr);
     
                     // Prepare for variable substitution in the following code block
                     Substitution prevSubst = naming.addVariableSubst(varDecl, substVarName.toString());
     
-                    List<JCStatement> stats = List.<JCStatement> of(decl2);
                     stats = stats.appendList(transformElseClause(elseClause, tmpVar, outerExpression));
                     JCBlock block = at(elseClause).Block(0, stats);
     
@@ -3706,7 +3761,7 @@ public class StatementTransformer extends AbstractTransformer {
                     elseSelectorAlias = naming.synthetic(elseVar);
                 }
             }
-            cases.add(make().Case(null, List.of(transformElse(elseSelectorAlias, caseList, tmpVar, outerExpression))));
+            cases.add(make().Case(null, List.of(transformElse(elseSelectorAlias, caseList, tmpVar, outerExpression, false))));
             
             
             JCStatement last = make().Switch(switchExpr, cases.toList());
@@ -3857,12 +3912,11 @@ public class StatementTransformer extends AbstractTransformer {
             if (primitiveSelector) {
                 bs = BoxingStrategy.UNBOXED;
                 selectorType = makeJavaType(switchExpressionType);
-                last = transformElse(null, caseList, tmpVar, outerExpression);
             } else {
                 bs = BoxingStrategy.BOXED;
                 selectorType = makeJavaType(switchExpressionType, JT_NO_PRIMITIVES|JT_RAW);
-                last = transformElse(selectorAlias, caseList, tmpVar, outerExpression);
             }
+            last = transformElse(selectorAlias, caseList, tmpVar, outerExpression, primitiveSelector);
             JCExpression selectorExpr = expressionGen().transformExpression(getSwitchExpression(switchClause), bs, switchExpressionType);
             
             JCVariableDecl selector = makeVar(selectorAlias, selectorType, selectorExpr);

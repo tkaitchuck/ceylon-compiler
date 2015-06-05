@@ -17,19 +17,25 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  * MA  02110-1301, USA.
  */
-shared interface InnerInterfaceInterface{} 
-
-shared interface InnerInterfaceContainer {
-    shared interface InnerInterface{
-        shared interface InnerInterface{}
-        shared class InnerClass(){}
+@noanno
+class CtorReturn {
+    print("A");
+    shared new () {
+        return;
     }
-    shared class InnerClass() {
-        shared interface InnerInterface{}
-        shared class InnerClass(){}
+    print("B");
+    shared new Baz() {
+        if(true) {
+            return;
+        }
+        //print("D");
     }
-    interface InnerInterfacePrivate{}
-}
-shared class ClassContainer(){
-    interface InnerInterfacePrivate{}
+    print("C");
+    shared new Gee(Boolean b) {
+        if(b) {
+            return;
+        }
+        print("D");
+    }
+    print("done");
 }
