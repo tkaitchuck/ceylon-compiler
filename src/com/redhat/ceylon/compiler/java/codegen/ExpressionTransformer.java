@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
 
+import com.redhat.ceylon.common.Backend;
 import com.redhat.ceylon.compiler.java.codegen.Invocation.TransformedInvocationPrimary;
 import com.redhat.ceylon.compiler.java.codegen.Naming.DeclNameFlag;
 import com.redhat.ceylon.compiler.java.codegen.Naming.Substitution;
@@ -65,6 +66,7 @@ import com.redhat.ceylon.model.typechecker.model.FunctionOrValue;
 import com.redhat.ceylon.model.typechecker.model.Functional;
 import com.redhat.ceylon.model.typechecker.model.Generic;
 import com.redhat.ceylon.model.typechecker.model.Interface;
+import com.redhat.ceylon.model.typechecker.model.ModelUtil;
 import com.redhat.ceylon.model.typechecker.model.Module;
 import com.redhat.ceylon.model.typechecker.model.Package;
 import com.redhat.ceylon.model.typechecker.model.Parameter;
@@ -894,7 +896,7 @@ public class ExpressionTransformer extends AbstractTransformer {
 
     private VarianceCastResult getVarianceCastResult(Type expectedType, Type exprType) {
         // exactly the same type, doesn't need casting
-        if(exprType.isExactly(expectedType))
+        if(expectedType == null || exprType.isExactly(expectedType))
             return null;
         // if we're not trying to put it into an interface, there's no need
         if(!(expectedType.getDeclaration() instanceof Interface))
@@ -1150,7 +1152,7 @@ public class ExpressionTransformer extends AbstractTransformer {
             }
             JCExpression typeCall = makeTypeLiteralCall(containerType, false, expr.getTypeModel());
             // make sure we cast it to ClassOrInterface
-            TypeDeclaration classOrInterfaceDeclaration = (TypeDeclaration) typeFact().getLanguageModuleModelDeclaration("ClassOrInterface");
+            TypeDeclaration classOrInterfaceDeclaration = (TypeDeclaration) typeFact().getLanguageModuleModelDeclaration(Decl.isConstructor(declaration) ? "ClassModel" : "ClassOrInterface");
             JCExpression classOrInterfaceTypeExpr = makeJavaType(
                     classOrInterfaceDeclaration.appliedReference(null, Arrays.asList(containerType)).getType());
 
@@ -1161,7 +1163,13 @@ public class ExpressionTransformer extends AbstractTransformer {
             JCExpression reifiedContainerExpr = makeReifiedTypeArgument(containerType);
             
             // make a raw call and cast
-            if(declaration instanceof Function){
+            if (Decl.isConstructor(declaration)) {
+                Type callableType = producedReference.getFullType();
+                JCExpression reifiedArgumentsExpr = makeReifiedTypeArgument(typeFact().getCallableTuple(callableType));
+                List<JCExpression> arguments = List.of(reifiedArgumentsExpr, ceylonLiteral(declaration.getName()));
+                JCExpression classModel = makeSelect(typeCall, "getConstructor");
+                memberCall = make().Apply(null, classModel, arguments);
+            } else if(declaration instanceof Function){
                 // we need to get types for each type argument
                 JCExpression closedTypesExpr = null;
                 if(expr.getTypeArgumentList() != null) {
@@ -1223,12 +1231,17 @@ public class ExpressionTransformer extends AbstractTransformer {
         ClassOrInterface container = (ClassOrInterface) declaration.getContainer();
         // use the generated class to get to the declaration literal
         JCExpression metamodelCall = makeTypeDeclarationLiteral(container);
-        JCExpression metamodelCast = makeJavaType(typeFact().getLanguageModuleDeclarationTypeDeclaration("ClassOrInterfaceDeclaration").getType(), JT_NO_PRIMITIVES);
+        JCExpression metamodelCast = makeJavaType(typeFact().getLanguageModuleDeclarationTypeDeclaration(
+                Decl.isConstructor(declaration) ? "ClassDeclaration": "ClassOrInterfaceDeclaration").getType(), 
+                JT_NO_PRIMITIVES);
         metamodelCall = make().TypeCast(metamodelCast, metamodelCall);
 
         String memberClassName;
+        String memberAccessor;
         if(declaration instanceof Class)
             memberClassName = "ClassDeclaration";
+        else if (Decl.isConstructor(declaration))
+            memberClassName = "ConstructorDeclaration";
         else if(declaration instanceof Interface)
             memberClassName = "InterfaceDeclaration";
         else if(declaration instanceof Function)
@@ -1238,11 +1251,16 @@ public class ExpressionTransformer extends AbstractTransformer {
         }else{
             return makeErroneous(node, "compiler bug: " + declaration + " is not a supported declaration literal");
         }
+        if (Decl.isConstructor(declaration))
+            memberAccessor = "getConstructorDeclaration";
+        else
+            memberAccessor = f ? "getMemberDeclaration" : "getDeclaredMemberDeclaration";
+        
         TypeDeclaration metamodelDecl = (TypeDeclaration) typeFact().getLanguageModuleDeclarationDeclaration(memberClassName);
         JCExpression memberType = makeJavaType(metamodelDecl.getType());
         JCExpression reifiedMemberType = makeReifiedTypeArgument(metamodelDecl.getType());
         JCExpression memberCall = make().Apply(List.of(memberType), 
-                                               makeSelect(metamodelCall, f ? "getMemberDeclaration" : "getDeclaredMemberDeclaration"), 
+                                               makeSelect(metamodelCall, memberAccessor), 
                                                List.of(reifiedMemberType, ceylonLiteral(declaration.getName())));
         return memberCall;
     }
@@ -1376,10 +1394,12 @@ public class ExpressionTransformer extends AbstractTransformer {
                                 List.of(expr.getType().getTypeModel().getQualifyingType(), 
                                         typeFact().getNothingType()))), 
                         classLiteral);
+                Type callableType = expr.getTypeModel().getFullType();
+                JCExpression reifiedArgumentsExpr = makeReifiedTypeArgument(typeFact().getCallableTuple(callableType));
                 return make().Apply(null, 
                         naming.makeQualIdent(typeCast, "getConstructor"),
                         List.<JCExpression>of(
-                                makeNull(),
+                                reifiedArgumentsExpr,
                                 make().Literal(expr.getDeclaration().getName())));
             } else {
                 return makeTypeLiteralCall(expr.getType().getTypeModel(), true, expr.getTypeModel());
@@ -3299,6 +3319,31 @@ public class ExpressionTransformer extends AbstractTransformer {
     private JCExpression transformInvocation(Invocation invocation, CallBuilder callBuilder,
             TransformedInvocationPrimary transformedPrimary) {
         invocation.location(callBuilder);
+        if (Decl.isConstructorPrimary(invocation.getPrimary())) {
+            Tree.StaticMemberOrTypeExpression qte = (Tree.StaticMemberOrTypeExpression)invocation.getPrimary();
+            // instantiator
+            Constructor ctor = Decl.getConstructor(qte.getDeclaration());
+            if (Strategy.generateInstantiator(ctor)) {
+                callBuilder.typeArguments(List.<JCExpression>nil());
+                java.util.List<Type> typeModels = qte.getTypeArguments().getTypeModels();
+                if (typeModels!=null) {
+                    for (Type tm : typeModels) {
+                        callBuilder.typeArgument(makeJavaType(tm, AbstractTransformer.JT_TYPE_ARGUMENT));
+                    }
+                }
+                callBuilder.invoke(naming.makeInstantiatorMethodName(transformedPrimary.expr, Decl.getConstructedClass(ctor)));
+            } else {
+                if (Decl.getConstructedClass(invocation.getPrimaryDeclaration()).isMember()
+                        && invocation.getPrimary() instanceof Tree.QualifiedMemberOrTypeExpression
+                        && !(((Tree.QualifiedMemberOrTypeExpression)invocation.getPrimary()).getPrimary() instanceof Tree.BaseTypeExpression)) {
+                    callBuilder.instantiate(new ExpressionAndType(transformedPrimary.expr, null),
+                            makeJavaType(invocation.getReturnType(), JT_CLASS_NEW | (transformedPrimary.expr ==  null ? 0 : JT_NON_QUALIFIED)));
+                } else {
+                    callBuilder.instantiate(
+                            makeJavaType(invocation.getReturnType(), JT_CLASS_NEW)/*transformedPrimary.expr*/);
+                }
+            }
+        } else
         if(invocation.getQmePrimary() != null 
                 && isJavaArray(invocation.getQmePrimary().getTypeModel())
                 && transformedPrimary.selector != null
@@ -3445,7 +3490,7 @@ public class ExpressionTransformer extends AbstractTransformer {
                     }
                 }
             }else{
-                if (classType.getDeclaration() instanceof Constructor) {
+                if (Decl.isConstructor(classType.getDeclaration())) {
                     classType = classType.getExtendedType();
                 }
                 JCExpression typeExpr = makeJavaType(classType, AbstractTransformer.JT_CLASS_NEW);
@@ -3617,6 +3662,27 @@ public class ExpressionTransformer extends AbstractTransformer {
         }
     }
 
+    public void makeHeaderSuperInvocation(Class decl, Node node, ClassDefinitionBuilder classBuilder) {
+        java.util.List<ParameterList> paramLists = decl.getParameterLists();
+        if(!paramLists.isEmpty()) {
+            boolean prevFnCall = withinInvocation(true);
+            try {
+                CallBuilder callBuilder = CallBuilder.instance(this);
+                callBuilder.invoke(naming.makeSuper());
+                for (Parameter p : paramLists.get(0).getParameters()) {
+                    callBuilder.argument(make().Ident(naming.makeQuotedName(p.getName())));
+                }
+                JCExpression superExpr = callBuilder.build();
+                if (node != null) {
+                    at(node);
+                }
+                classBuilder.getInitBuilder().delegateCall(make().Exec(superExpr));
+            } finally {
+                withinInvocation(prevFnCall);
+            }
+        }
+    }
+
     /**
      * Transform a delegated constructor call ({@code extends XXX()})
      * which may be either a superclass initializer/constructor or a 
@@ -3651,7 +3717,7 @@ public class ExpressionTransformer extends AbstractTransformer {
             at(builder.getNode());
             JCExpression expr = null;
             Scope outerDeclaration;
-            if (primaryDeclaration instanceof Constructor) {
+            if (Decl.isConstructor(primaryDeclaration)) {
                 outerDeclaration= builder.getPrimaryDeclaration().getContainer().getContainer();
             } else {
                 outerDeclaration= builder.getPrimaryDeclaration().getContainer();
@@ -3824,7 +3890,39 @@ public class ExpressionTransformer extends AbstractTransformer {
                             producedReference).build();
                 }
             } 
-            if (member instanceof Function) {
+            if (member instanceof Value) {
+                if (expr.getStaticMethodReference()
+                        && Decl.isEnumeratedConstructor((Value)member)) {
+                    CallBuilder callBuilder = CallBuilder.instance(this);
+                    JCExpression qualExpr;
+                    Class class1 = (Class) member.getContainer();
+                    if (class1.isToplevel()) {
+                        qualExpr = naming.makeTypeDeclarationExpression(null, (TypeDeclaration)member.getContainer(), DeclNameFlag.QUALIFIED);
+                        callBuilder.invoke(naming.makeQualifiedName(qualExpr, (TypedDeclaration)member, Naming.NA_GETTER | Naming.NA_MEMBER));
+                    } else if (class1.isMember()){
+                        qualExpr = primary instanceof Tree.QualifiedMemberOrTypeExpression ? transformExpression(((Tree.QualifiedMemberOrTypeExpression)primary).getPrimary()) : null;
+                        callBuilder.invoke(naming.makeQualifiedName(qualExpr, (TypedDeclaration)member, Naming.NA_GETTER | Naming.NA_MEMBER));
+                    } else {
+                        callBuilder.fieldRead(naming.makeName((TypedDeclaration)member, Naming.NA_IDENT));
+                    }
+                    
+                    return callBuilder.build();
+                } else {
+                    return CallableBuilder.unboundValueMemberReference(
+                            gen(),
+                            expr,
+                            expr.getTypeModel(), 
+                            ((TypedDeclaration)member)).build();
+                }
+            } else if (Decl.isConstructor(member)) {
+                Reference producedReference = expr.getTarget();
+                return CallableBuilder.unboundFunctionalMemberReference(
+                        gen(), 
+                        expr,
+                        expr.getTypeModel(), 
+                        Decl.getConstructor(member), 
+                        producedReference).build();
+            } else if (member instanceof Function) {
                 Function method = (Function)member;
                 if (!method.isParameter()) {
                     Reference producedReference = method.appliedReference(qualifyingType, typeArguments.getTypeModels());
@@ -3843,12 +3941,6 @@ public class ExpressionTransformer extends AbstractTransformer {
                             method, 
                             producedReference).build();
                 }
-            } else if (member instanceof Value) {
-                return CallableBuilder.unboundValueMemberReference(
-                        gen(),
-                        expr,
-                        expr.getTypeModel(), 
-                        ((TypedDeclaration)member)).build();
             } else if (member instanceof Class) {
                 Reference producedReference = expr.getTarget();
                 return CallableBuilder.unboundFunctionalMemberReference(
@@ -3856,14 +3948,6 @@ public class ExpressionTransformer extends AbstractTransformer {
                         expr,
                         expr.getTypeModel(), 
                         (Class)member, 
-                        producedReference).build();
-            } else if (member instanceof Constructor) {
-                Reference producedReference = expr.getTarget();
-                return CallableBuilder.unboundFunctionalMemberReference(
-                        gen(), 
-                        expr,
-                        expr.getTypeModel(), 
-                        (Constructor)member, 
                         producedReference).build();
             } else {
                 return makeErroneous(expr, "compiler bug: member reference of " + expr + " not supported yet");
@@ -4097,12 +4181,12 @@ public class ExpressionTransformer extends AbstractTransformer {
             // only useful for the typechecker resolving
             
             Tree.Primary primary = expr.getPrimary();
-            if (expr.getDeclaration() instanceof Constructor) {
-                Constructor ctor = (Constructor)expr.getDeclaration();
-                if (primary instanceof Tree.QualifiedTypeExpression) {
+            if (Decl.isConstructor(expr.getDeclaration())) {
+                Constructor ctor = Decl.getConstructor(expr.getDeclaration());
+                if (primary instanceof Tree.QualifiedMemberOrTypeExpression) {
                     // foo.Class.Ctor => foo
-                    primary = ((Tree.QualifiedTypeExpression)primary).getPrimary();
-                } else if (primary instanceof Tree.BaseTypeExpression) {
+                    primary = ((Tree.QualifiedMemberOrTypeExpression)primary).getPrimary();
+                } else if (primary instanceof Tree.BaseMemberOrTypeExpression) {
                     // Class.Ctor => null
                     return null;
                 }
@@ -4166,10 +4250,14 @@ public class ExpressionTransformer extends AbstractTransformer {
                     method, producedReference, parameterList));
         } else if (decl instanceof Class) {
             Class class_ = (Class)decl;
-            final ParameterList parameterList = class_.getFirstParameterList();
-            Reference producedReference = qmte.getTarget();
-            return utilInvocation().checkNull(makeJavaStaticInvocation(gen(),
-                    class_, producedReference, parameterList));
+            if (class_.isStaticallyImportable()) {
+                return naming.makeTypeDeclarationExpression(null, class_, Naming.DeclNameFlag.QUALIFIED);
+            } else {
+                final ParameterList parameterList = class_.getFirstParameterList();
+                Reference producedReference = qmte.getTarget();
+                return utilInvocation().checkNull(makeJavaStaticInvocation(gen(),
+                        class_, producedReference, parameterList));
+            }
         } else {
             return makeErroneous(qmte, "compiler bug: unsupported static");
         }
@@ -4396,6 +4484,15 @@ public class ExpressionTransformer extends AbstractTransformer {
             }
         }
         
+        // Make sure we're using the correct declaration in case of natives
+        // (the header might look like a field while the implementation is a getter)
+        if (decl.isNativeHeader()) {
+            Declaration d = ModelUtil.getNativeDeclaration(decl, Backend.Java);
+            if (d != null) {
+                decl = d;
+            }
+        }
+        
         // Explanation: primaryExpr and qualExpr both specify what is to come before the selector
         // but the important difference is that primaryExpr is used for those situations where
         // the result comes from the actual Ceylon code while qualExpr is used for those situations
@@ -4432,8 +4529,7 @@ public class ExpressionTransformer extends AbstractTransformer {
         } else if (Decl.isValueOrSharedOrCapturedParam(decl)) {
             if (decl.isToplevel()) {
                 // ERASURE
-                if ("null".equals(decl.getName())) {
-                    // FIXME this is a pretty brain-dead way to go about erase I think
+                if (isNullValue(decl)) {
                     result = makeNull();
                 } else if (isBooleanTrue(decl)) {
                     result = makeBoolean(true);
@@ -4513,10 +4609,11 @@ public class ExpressionTransformer extends AbstractTransformer {
                 selector = naming.selector((Function)decl);
             }
         }
+        boolean isCtor = decl instanceof Function && ((Function)decl).getTypeDeclaration() instanceof Constructor;
         if (result == null) {
-            boolean useGetter = !(decl instanceof Function || decl instanceof Constructor) && !mustUseField && !mustUseParameter;
+            boolean useGetter = !(decl instanceof Function || isCtor) && !mustUseField && !mustUseParameter;
             if (qualExpr == null && selector == null
-                    && !(decl instanceof Constructor)) {
+                    && !(isCtor)) {
                 useGetter = Decl.isClassAttribute(decl) && CodegenUtil.isErasedAttribute(decl.getName());
                 if (useGetter) {
                     selector = naming.selector((TypedDeclaration)decl);
@@ -4618,7 +4715,7 @@ public class ExpressionTransformer extends AbstractTransformer {
         if (qualExpr == null 
                 // statics are not members that can be inherited
                 && !decl.isStaticallyImportable()
-                && !(decl instanceof Constructor)
+                && !Decl.isConstructor(decl)
                 && decl.isMember()
                 // dodge variable refinements with assert/is (these will be turned to locals
                 // and have a name mapping)
@@ -5959,6 +6056,8 @@ public class ExpressionTransformer extends AbstractTransformer {
             outputs = AnnotationUtil.outputs((Tree.TypeAliasDeclaration)annotated);
         } else if (annotated instanceof Tree.Constructor) {
             outputs = AnnotationUtil.outputs((Tree.Constructor)annotated);
+        } else if (annotated instanceof Tree.Enumerated) {
+            outputs = AnnotationUtil.outputs((Tree.Enumerated)annotated);
         } else if (annotated instanceof Tree.AnyMethod) {
             outputs = AnnotationUtil.outputs((Tree.AnyMethod)annotated);
         } else if (annotated instanceof Tree.AttributeDeclaration) {

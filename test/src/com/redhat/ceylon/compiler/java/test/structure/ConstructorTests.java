@@ -184,4 +184,18 @@ public class ConstructorTests extends CompilerTests {
     public void testCtorReturn() {
         compareWithJavaSource("constructor/CtorReturn");
     }
+    
+    @Test
+    public void testCtorSingletonCtors() {
+        compareWithJavaSource("constructor/SingletonCtors");
+        //compile("constructor/SingletonCtors.ceylon");
+        run("com.redhat.ceylon.compiler.java.test.structure.constructor.singletonCtors");
+    }
+    
+    @Test
+    public void testCtorSingletonCtorDelegation() {
+        compareWithJavaSource("constructor/SingletonCtorDelegation");
+        //compile("constructor/SingletonCtors.ceylon");
+        run("com.redhat.ceylon.compiler.java.test.structure.constructor.singletonCtorDelegation");
+    }
 }

@@ -27,6 +27,8 @@ import org.junit.Test;
 
 import com.redhat.ceylon.compiler.java.test.CompilerError;
 import com.redhat.ceylon.compiler.java.test.CompilerTests;
+import com.redhat.ceylon.model.cmr.JDKUtils;
+import com.redhat.ceylon.model.cmr.JDKUtils.JDK;
 
 
 public class IssuesTests_2000_2499 extends CompilerTests {
@@ -275,9 +277,16 @@ public class IssuesTests_2000_2499 extends CompilerTests {
 
     @Test
     public void testBug2136() {
-        assertErrors("bug21xx/Bug2136",
-                new CompilerError(Kind.WARNING, null, 1, "imported declaration is deprecated: 'StringBufferInputStream'"),
-                new CompilerError(Kind.WARNING, null, 3, "type is deprecated: 'StringBufferInputStream'"));
+        if(JDKUtils.jdk == JDK.JDK8){
+            assertErrors("bug21xx/Bug2136",
+                    new CompilerError(Kind.WARNING, null, 22, "You import JDK7, which is provided by the JDK8 you are running on, but we cannot check that you are not using any JDK8-specific classes or methods. Upgrade your import to JDK8 if you depend on JDK8 classes or methods."),
+                    new CompilerError(Kind.WARNING, null, 1, "imported declaration is deprecated: 'StringBufferInputStream'"),
+                    new CompilerError(Kind.WARNING, null, 3, "type is deprecated: 'StringBufferInputStream'"));
+        }else{
+            assertErrors("bug21xx/Bug2136",
+                    new CompilerError(Kind.WARNING, null, 20, "imported declaration is deprecated: 'StringBufferInputStream'"),
+                    new CompilerError(Kind.WARNING, null, 22, "type is deprecated: 'StringBufferInputStream'"));
+        }
     }
     
     @Test
@@ -323,6 +332,37 @@ public class IssuesTests_2000_2499 extends CompilerTests {
     @Test
     public void testBug2186() {
         assertErrors("bug21xx/Bug2186",
-                new CompilerError(4, "missing invocation expression"));
+                new CompilerError(23, "missing invocation expression"));
+    }
+    
+    @Test
+    public void testBug2188() {
+        compareWithJavaSource("bug21xx/Bug2188");
+    }
+    
+    @Test
+    public void testBug2189() {
+        compareWithJavaSource("bug21xx/bug2189/Bug2189");
+    }
+
+    @Test
+    public void testBug2190() {
+        compareWithJavaSource("bug21xx/Bug2190");
+    }
+    
+    @Test
+    public void testBug2193() {
+        compareWithJavaSource("bug21xx/Bug2193");
+    }
+    
+    @Test
+    public void testBug2197() {
+        compareWithJavaSource("bug21xx/Bug2197");
+    }
+    
+    @Test
+    @Ignore
+    public void testBug2198() {
+        compareWithJavaSource("bug21xx/Bug2198");
     }
 }

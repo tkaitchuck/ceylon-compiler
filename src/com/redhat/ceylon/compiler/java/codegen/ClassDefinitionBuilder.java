@@ -31,11 +31,14 @@ import com.redhat.ceylon.compiler.typechecker.tree.Tree;
 import com.redhat.ceylon.model.typechecker.model.Annotation;
 import com.redhat.ceylon.model.typechecker.model.Class;
 import com.redhat.ceylon.model.typechecker.model.ClassOrInterface;
+import com.redhat.ceylon.model.typechecker.model.Declaration;
 import com.redhat.ceylon.model.typechecker.model.Generic;
 import com.redhat.ceylon.model.typechecker.model.Interface;
+import com.redhat.ceylon.model.typechecker.model.ModelUtil;
 import com.redhat.ceylon.model.typechecker.model.Type;
 import com.redhat.ceylon.model.typechecker.model.TypeDeclaration;
 import com.redhat.ceylon.model.typechecker.model.TypeParameter;
+import com.redhat.ceylon.model.typechecker.model.Value;
 import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
@@ -87,7 +90,8 @@ public class ClassDefinitionBuilder {
     private final ListBuffer<MethodDefinitionBuilder> constructors = ListBuffer.lb();
     private final ListBuffer<JCTree> defs = ListBuffer.lb();
     private ClassDefinitionBuilder concreteInterfaceMemberDefs;
-    private final ListBuffer<JCTree> also = ListBuffer.lb();
+    private final ListBuffer<JCTree> before = ListBuffer.lb();
+    private final ListBuffer<JCTree> after = ListBuffer.lb();
     
 
     private boolean built = false;
@@ -109,8 +113,8 @@ public class ClassDefinitionBuilder {
         return builder;
     }
     
-    public static ClassDefinitionBuilder object(AbstractTransformer gen, String ceylonClassName, boolean isLocal) {
-        return klass(gen, Naming.quoteClassName(ceylonClassName), ceylonClassName, isLocal);
+    public static ClassDefinitionBuilder object(AbstractTransformer gen, String javaClassName, String ceylonClassName, boolean isLocal) {
+        return klass(gen, javaClassName, ceylonClassName, isLocal);
     }
     
     public static ClassDefinitionBuilder methodWrapper(AbstractTransformer gen, String ceylonClassName, boolean shared) {
@@ -167,12 +171,27 @@ public class ClassDefinitionBuilder {
             throw new BugException("already built");
         }
         built = true;
+        
+        // For native class (and objects) implementations that don't define
+        // a class to extend we force them to extend their native header
+        // (when they _do_ extend it is handled in CeylonVisitor.visit(Tree.ExtendedType))
+        if (extendingType == null && forDefinition != null && forDefinition.isNative() && !forDefinition.isNativeHeader()) {
+            Declaration hdrDefinition = ModelUtil.getNativeHeader(forDefinition.getContainer(), forDefinition.getName());
+            if (hdrDefinition != null) {
+                if (hdrDefinition instanceof Value && ModelUtil.isObject((Value)hdrDefinition)) {
+                    hdrDefinition = ((Value)hdrDefinition).getType().getDeclaration();
+                }
+                Type tp = forDefinition.getType();
+                extending(tp, ((ClassOrInterface)hdrDefinition).getType(), ((Class)tp.getDeclaration()).hasConstructors());
+                gen.expressionGen().makeHeaderSuperInvocation((Class)forDefinition, null, this);
+            }
+        }
+        
         ListBuffer<JCTree> defs = ListBuffer.lb();
         appendDefinitionsTo(defs);
         if (!typeParamAnnotations.isEmpty() || typeParams.size() != typeParamAnnotations.size()) {
             annotations(gen.makeAtTypeParameters(typeParamAnnotations.toList()));
         }
-        
         
         JCTree.JCClassDecl klass = gen.make().ClassDef(
                 gen.make().Modifiers(modifiers, getAnnotations()),
@@ -190,23 +209,25 @@ public class ClassDefinitionBuilder {
         
         if (isInterface()) {
             if (this == getTopLevelBuilder()) {
-                klasses.appendList(also.toList());
+                klasses.appendList(before.toList());
                 klasses.append(klass);
                 if (hasCompanion()) {
                     klasses.appendList(concreteInterfaceMemberDefs.build());
                 }
+                klasses.appendList(after.toList());
             } else {
                 if (hasCompanion()) {
                     klasses.appendList(concreteInterfaceMemberDefs.build());
                 }
-                getTopLevelBuilder().also(klass);
+                getTopLevelBuilder().before(klass);
             }
         } else {
-            klasses.appendList(also.toList());
+            klasses.appendList(before.toList());
             if (hasCompanion()) {
                 klasses.appendList(concreteInterfaceMemberDefs.build());
             }
             klasses.append(klass);
+            klasses.appendList(after.toList());
         }
         
         gen.replace(getContainingClassBuilder());
@@ -232,8 +253,12 @@ public class ClassDefinitionBuilder {
                     && concreteInterfaceMemberDefs.constructors.isEmpty()));
     }
 
-    private void also(JCTree also) {
-        this.also.append(also);
+    private void before(JCTree also) {
+        this.before.append(also);
+    }
+    
+    void after(JCTree also) {
+        this.after.append(also);
     }
 
     private void appendDefinitionsTo(ListBuffer<JCTree> defs) {
@@ -414,7 +439,12 @@ public class ClassDefinitionBuilder {
             ret = ret.prependList(gen.makeAtIgnore());
         }else{
             if (hasConstructors || thisType != null) {
-                ret = ret.prependList(gen.makeAtClass(thisType, extendingType, hasConstructors));
+                Type exType = extendingType;
+                if (extendingType != null
+                        && extendingType.getDeclaration().isNativeHeader()) {
+                    exType = extendingType.getExtendedType();
+                }
+                ret = ret.prependList(gen.makeAtClass(thisType, exType, hasConstructors));
             }
             ret = ret.prependList(this.annotations.toList());
         }
@@ -572,7 +602,7 @@ public class ClassDefinitionBuilder {
 
     public ClassDefinitionBuilder forDefinition(ClassOrInterface def) {
         this.forDefinition = def;
-        this.hasConstructors = def instanceof Class && ((Class)def).hasConstructors();
+        this.hasConstructors = def instanceof Class && (((Class)def).hasConstructors() || ((Class)def).hasEnumerated());
         return this;
     }
 

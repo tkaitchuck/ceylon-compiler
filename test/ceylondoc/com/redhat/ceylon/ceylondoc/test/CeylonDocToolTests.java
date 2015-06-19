@@ -741,17 +741,17 @@ public class CeylonDocToolTests {
         assertMatchInFile(destDir, "StubClassWithConstructors.type.html", 
                 Pattern.compile("<span class='identifier'>StubClassWithConstructors</span>\\(\\)"));
         assertMatchInFile(destDir, "StubClassWithConstructors.type.html", 
-                Pattern.compile("Ctor1"));
+                Pattern.compile("ctor1"));
         assertMatchInFile(destDir, "StubClassWithConstructors.type.html", 
-                Pattern.compile("Ctor2"));
+                Pattern.compile("ctor2"));
         
         if( includeNonShared ) {
             assertMatchInFile(destDir, "StubClassWithConstructors.type.html", 
-                    Pattern.compile("CtorInternal"));
+                    Pattern.compile("ctorInternal"));
         }
         else {
             assertNoMatchInFile(destDir, "StubClassWithConstructors.type.html", 
-                    Pattern.compile("CtorInternal"));
+                    Pattern.compile("ctorInternal"));
         }
     }
 
@@ -838,11 +838,17 @@ public class CeylonDocToolTests {
                 + "<a class='link' href='index.html#section-package' title='Go to package com.redhat.ceylon.ceylondoc.test.modules.single'><code>com.redhat.ceylon.ceylondoc.test.modules.single</code></a>"));
         
         assertMatchInFile(destDir, "StubClass.type.html", Pattern.compile("<div class='see section'><span class='title'>See also </span>"
-                + "<span class='value'><code><a class='link' href='StubInterface.type.html' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::StubInterface'><span class='type-identifier'>StubInterface</span></a></code>, "
+                + "<span class='value'>"
+                + "<code><a class='link' href='StubClass.type.html' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::StubClass'><span class='type-identifier'>StubClass</span></a></code>, "
+                + "<code><a class='link' href='StubInterface.type.html' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::StubInterface'><span class='type-identifier'>StubInterface</span></a></code>, "
                 + "<a class='link' href='index.html#stubTopLevelAttribute' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::stubTopLevelAttribute'><code><span class='identifier'>stubTopLevelAttribute</span></code></a>, "
                 + "<a class='link' href='index.html#stubTopLevelMethod' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::stubTopLevelMethod'><code><span class='identifier'>stubTopLevelMethod\\(\\)</span></code></a>, "
                 + "<a class='link' href='index.html' title='Go to module'><code>com.redhat.ceylon.ceylondoc.test.modules.single</code></a>, "
                 + "<a class='link' href='a/index.html' title='Go to package com.redhat.ceylon.ceylondoc.test.modules.single.a'><code>com.redhat.ceylon.ceylondoc.test.modules.single.a</code></a>"));
+        
+        assertMatchInFile(destDir, "StubInterface.type.html", Pattern.compile("<div class='see section'><span class='title'>See also </span>"
+                + "<span class='value'>"
+                + "<code><a class='link' href='StubInterface.type.html' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::StubInterface'><span class='type-identifier'>StubInterface</span></a></code>"));
 
         // FIXME: enable back when we can have metamodel refs to object members
         assertMatchInFile(destDir, "StubClass.type.html", Pattern.compile("<div class='see section'><span class='title'>See also </span><span class='value'><a class='link' href='StubClass.type.html#methodWithSee' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::StubClass.methodWithSee'><code><span class='identifier'>methodWithSee\\(\\)</span></code></a>"/*, <a class='link' href='stubObject.object.html#foo' title='Go to com.redhat.ceylon.ceylondoc.test.modules.single::stubObject.foo'>stubObject.foo</a>"*/));

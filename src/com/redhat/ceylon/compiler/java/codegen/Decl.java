@@ -157,6 +157,7 @@ public class Decl {
     
     public static boolean isMethodOrSharedOrCapturedParam(Declaration decl) {
         return decl instanceof Function 
+                && !isConstructor(decl)
                     && (!((Function)decl).isParameter() || decl.isShared() || decl.isCaptured());
     }
 
@@ -366,7 +367,7 @@ public class Decl {
     }
     
     public static String getNative(Declaration decl) {
-        return decl.getNative();
+        return decl.getNativeBackend();
     }
     
     public static boolean isForBackend(Tree.Declaration decl) {
@@ -376,6 +377,27 @@ public class Decl {
     public static boolean isForBackend(Declaration decl) {
         String backend = getNative(decl);
         return backend == null || backend.equals(Backend.Java.nativeAnnotation);
+    }
+    
+    public static boolean isHeaderWithoutBackend(Tree.Declaration decl) {
+        return isHeaderWithoutBackend(decl.getDeclarationModel());
+    }
+    
+    public static boolean isHeaderWithoutBackend(Declaration decl) {
+        return decl.isNativeHeader()
+                && (ModelUtil.getNativeDeclaration(decl, Backend.Java) == null);
+    }
+    
+    public static boolean isImplemented(Tree.Declaration decl) {
+        return isImplemented(decl.getDeclarationModel());
+    }
+    
+    public static boolean isImplemented(Declaration decl) {
+        if (decl instanceof FunctionOrValue) {
+            return ((FunctionOrValue)decl).isImplemented();
+        } else {
+            return false;
+        }
     }
     
     public static boolean isDeferred(Tree.Declaration decl) {
@@ -794,11 +816,16 @@ public class Decl {
     }
     
     public static boolean isConstructorPrimary(Tree.Term term) {
-        return term instanceof Tree.MemberOrTypeExpression
-                && ((Tree.MemberOrTypeExpression)term).getDeclaration() != null
-                && (((Tree.MemberOrTypeExpression)term).getDeclaration() instanceof Constructor
-                        || (((Tree.MemberOrTypeExpression)term).getDeclaration() instanceof Class
-                                && ((Class)((Tree.MemberOrTypeExpression)term).getDeclaration()).hasConstructors()));
+        if (term instanceof Tree.MemberOrTypeExpression) {
+            Declaration decl = ((Tree.MemberOrTypeExpression)term).getDeclaration();
+            return decl != null
+                    && (isConstructor(decl)
+                    || (decl instanceof Class
+                            && ((Class)decl).hasConstructors()));
+        } else {
+            return false;
+        }
+        
     }
     
     
@@ -887,6 +914,10 @@ public class Decl {
     }
     
     public static Class getConstructedClass(Declaration classOrCtor) {
+        if (classOrCtor instanceof FunctionOrValue &&
+                ((FunctionOrValue)classOrCtor).getTypeDeclaration() instanceof Constructor) {
+            classOrCtor = ((FunctionOrValue)classOrCtor).getTypeDeclaration();
+        }
         if (classOrCtor instanceof Constructor) {
             return (Class)classOrCtor.getContainer();
         } else if (classOrCtor instanceof Class) {
@@ -910,6 +941,16 @@ public class Decl {
         }
         return false;
     }
+    
+    /** Is the given constructor an enumerated ("singleton") constructor */
+    public static boolean isEnumeratedConstructor(Constructor ctor) {
+        return ctor != null && ctor.getContainer().getDirectMember(ctor.getName(), null, false) instanceof Value;
+    }
+    
+    /** Is the given value the result of an enumerated ("singleton") constructor */
+    public static boolean isEnumeratedConstructor(Value value) {
+        return value.getType().getDeclaration() instanceof Constructor;
+    }
 
     public static Declaration getDeclarationScope(Scope scope) {
         while (true) {
@@ -932,5 +973,20 @@ public class Decl {
             container = container.getContainer();
         }
         return false;
+    }
+
+    public static boolean isConstructor(Declaration decl) {
+        return getConstructor(decl) != null;
+    }
+    
+    public static Constructor getConstructor(Declaration decl) {
+        if (decl instanceof Constructor) {
+            return (Constructor)decl;
+        } else if (decl instanceof FunctionOrValue
+                && ((FunctionOrValue)decl).getTypeDeclaration() instanceof Constructor) {
+            return (Constructor)((FunctionOrValue)decl).getTypeDeclaration();
+        } else {
+            return null;
+        }
     }
 }

@@ -126,14 +126,14 @@ import com.sun.tools.javac.util.Position.LineMap;
  */
 public abstract class AbstractTransformer implements Transformation {
 
-    private final static TypePrinter typeSerialiser = new TypePrinter(false){
-        protected boolean printFullyQualified() {
-            return true;
-        }
-        protected boolean printQualifier() {
-            return true;
-        }
-    };
+    private final static TypePrinter typeSerialiser = new TypePrinter(
+            true,//printAbbreviated 
+            true,//printTypeParameters 
+            false,//printTypeParameterDetail 
+            true,//printQualifyingType 
+            false,//escapeLowercased 
+            true,//printFullyQualified 
+            true);//printQualifier
 
     private Context context;
     private TreeMaker make;
@@ -191,17 +191,33 @@ public abstract class AbstractTransformer implements Transformation {
         }
     }
     
+
+    boolean blocked = false;
+    int block() {
+        gen().blocked = true;
+        return make.pos;
+    }
+    int unblock() {
+        gen().blocked = false;
+        return make.pos;
+    }
+    protected void _at(int pos) {
+        if (!gen().blocked) {
+            make.at(pos);
+        }
+    }
+    
     @Override
     public Factory at(Node node) {
         if (node == null) {
-            make.at(Position.NOPOS);
+            _at(Position.NOPOS);
             
         }
         else {
             Token token = node.getToken();
             if (token != null) {
                 int tokenStartPosition = getMap().getStartPosition(token.getLine()) + token.getCharPositionInLine();
-                make().at(tokenStartPosition);
+                _at(tokenStartPosition);
                 if (javaPositionsRetriever != null) {
                     javaPositionsRetriever.addCeylonNode(tokenStartPosition, node);
                 }
@@ -212,13 +228,13 @@ public abstract class AbstractTransformer implements Transformation {
     
     public Factory at(Node node, Token token) {
         if (token == null) {
-            make.at(Position.NOPOS);
+            _at(Position.NOPOS);
             
         }
         else {
             if (token != null) {
                 int tokenStartPosition = getMap().getStartPosition(token.getLine()) + token.getCharPositionInLine();
-                make().at(tokenStartPosition);
+                _at(tokenStartPosition);
                 if (javaPositionsRetriever != null) {
                     javaPositionsRetriever.addCeylonNode(tokenStartPosition, node);
                 }
@@ -243,7 +259,7 @@ public abstract class AbstractTransformer implements Transformation {
          */
         @Override
         public void close() {
-            make.at(pos);
+            _at(pos);
         }
     }
     
@@ -253,7 +269,7 @@ public abstract class AbstractTransformer implements Transformation {
      */
     public SavedPosition savePosition(int at) {
         SavedPosition saved = new SavedPosition(make.pos);
-        make.at(at);
+        _at(at);
         return saved;
     }
     
@@ -270,7 +286,7 @@ public abstract class AbstractTransformer implements Transformation {
      */
     public SavedPosition noPosition() {
         SavedPosition saved = new SavedPosition(make.pos);
-        make.at(Position.NOPOS);
+        _at(Position.NOPOS);
         return saved;
     }
     
@@ -1042,13 +1058,13 @@ public abstract class AbstractTransformer implements Transformation {
         // first look in super types
         if(typeDecl.getExtendedType() != null){
             TypedDeclaration refinedDecl = getFirstRefinedDeclaration(typeDecl.getExtendedType().getDeclaration(), decl, signature, visited, false);
-            if(refinedDecl != null)
+            if(refinedDecl != null && refinedDecl.isShared())
                 return refinedDecl;
         }
         // look in interfaces
         for(Type interf : typeDecl.getSatisfiedTypes()){
             TypedDeclaration refinedDecl = getFirstRefinedDeclaration(interf.getDeclaration(), decl, signature, visited, false);
-            if(refinedDecl != null)
+            if(refinedDecl != null && refinedDecl.isShared())
                 return refinedDecl;
         }
         // not found
@@ -2507,6 +2523,9 @@ public abstract class AbstractTransformer implements Transformation {
         if ((flags & JT_NON_QUALIFIED) == 0) {
             args.add(DeclNameFlag.QUALIFIED);
         }
+        if ((flags & JT_EXTENDS) != 0) {
+            args.add(DeclNameFlag.NATIVEHEADER);
+        }
         DeclNameFlag[] opts = args.toArray(new DeclNameFlag[args.size()]);
         return opts;
     }
@@ -2890,7 +2909,7 @@ public abstract class AbstractTransformer implements Transformation {
     List<JCAnnotation> makeAtModule(Module module) {
         ListBuffer<JCExpression> imports = new ListBuffer<JCTree.JCExpression>();
         for(ModuleImport dependency : module.getImports()){
-            if (!isForBackend(dependency.getNative(), Backend.Java)) {
+            if (!isForBackend(dependency.getNativeBackend(), Backend.Java)) {
                 continue;
             }
             Module dependencyModule = dependency.getModule();
@@ -2938,6 +2957,10 @@ public abstract class AbstractTransformer implements Transformation {
 
     List<JCAnnotation> makeAtName(String name) {
         return makeModelAnnotation(syms().ceylonAtNameType, List.<JCExpression>of(make().Literal(name)));
+    }
+    
+    List<JCAnnotation> makeAtEnumerated() {
+        return makeModelAnnotation(syms().ceylonAtEnumeratedType, List.<JCExpression>nil());
     }
 
     List<JCAnnotation> makeAtAlias(Type type, Constructor constructor) {
@@ -4185,6 +4208,9 @@ public abstract class AbstractTransformer implements Transformation {
                 // or parhaps a A|B|C|D and we're testing for C|D
                 java.util.List<Type> cases = expressionType.getCaseTypes();
                 if (cases != null) {
+                    java.util.List<Type> copiedCases = new ArrayList<>(cases.size());
+                    copiedCases.addAll(cases);
+                    cases = copiedCases;
                     if ((testedType.isClassOrInterface()
                             || testedType.isTypeParameter())
                             && cases.remove(testedType)) { 
@@ -4886,6 +4912,9 @@ public abstract class AbstractTransformer implements Transformation {
         if(declaration instanceof ClassOrInterface){
             // Java constructors don't support reified type arguments
             return Decl.isCeylon((TypeDeclaration) declaration);
+        }else if(Decl.isConstructor(declaration)){
+            // Java constructors don't support reified type arguments
+            return Decl.isCeylon(Decl.getConstructor(declaration));
         }else if(declaration instanceof Function){
             if (((Function)declaration).isParameter()) {
                 // those can never be parameterised
@@ -4902,9 +4931,6 @@ public abstract class AbstractTransformer implements Transformation {
             if(container == null)
                 return true;
             return supportsReified(container);
-        }else if(declaration instanceof Constructor){
-            // Java constructors don't support reified type arguments
-            return Decl.isCeylon((Constructor) declaration);
         }else{
             throw BugException.unhandledDeclarationCase(declaration);
         }
@@ -4933,8 +4959,8 @@ public abstract class AbstractTransformer implements Transformation {
         Declaration declaration = producedReference.getDeclaration();
         if(declaration instanceof ClassOrInterface)
             return ((ClassOrInterface)declaration).getTypeParameters();
-        else if(declaration instanceof Constructor)
-            return ((Class)((Constructor)declaration).getContainer()).getTypeParameters();
+        else if(Decl.isConstructor(declaration))
+            return (Decl.getConstructedClass(declaration)).getTypeParameters();
         else
             return ((Function)declaration).getTypeParameters();
     }

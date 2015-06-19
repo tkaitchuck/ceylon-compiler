@@ -171,7 +171,7 @@ class TryCatchGenericIntersection implements .com.redhat.ceylon.compiler.java.ru
         try {
             throw exception;
         } catch (final .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric exception$4) {
-            if (exception$4 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$4, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$)) || exception$4 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$4, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
+            if (.com.redhat.ceylon.compiler.java.Util.isReified(exception$4, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$)) || .com.redhat.ceylon.compiler.java.Util.isReified(exception$4, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
                 final .java.lang.Object e = exception$4;
                 .ceylon.language.print_.print(.ceylon.language.String.instance("Caught ExceptionGeneric<String>|ExceptionGeneric<Integer>"));
             } else throw exception$4;
@@ -186,10 +186,10 @@ class TryCatchGenericIntersection implements .com.redhat.ceylon.compiler.java.ru
         try {
             throw exception;
         } catch (final .java.lang.Throwable exception$5) {
-            if (.com.redhat.ceylon.compiler.java.Util.isReified(exception$5, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$))) {
+            if (exception$5 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$5, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$))) {
                 final .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.String> e = (.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.String>)(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric)exception$5;
                 .ceylon.language.print_.print(.ceylon.language.String.instance("Caught ExceptionGeneric<String>"));
-            } else if (.com.redhat.ceylon.compiler.java.Util.isReified(exception$5, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
+            } else if (exception$5 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$5, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
                 final .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.Integer> e = (.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.Integer>)(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric)exception$5;
                 .ceylon.language.print_.print(.ceylon.language.String.instance("Caught ExceptionGeneric<Integer>"));
             } else if (exception$5 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionSub) {
@@ -207,10 +207,10 @@ class TryCatchGenericIntersection implements .com.redhat.ceylon.compiler.java.ru
         try {
             throw exception;
         } catch (final .java.lang.Throwable exception$6) {
-            if (.com.redhat.ceylon.compiler.java.Util.isReified(exception$6, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$))) {
+            if (exception$6 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$6, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.String.$TypeDescriptor$))) {
                 final .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.String> e = (.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.String>)(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric)exception$6;
                 .ceylon.language.print_.print(.ceylon.language.String.instance("Caught ExceptionGeneric<String>"));
-            } else if (.com.redhat.ceylon.compiler.java.Util.isReified(exception$6, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
+            } else if (exception$6 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric && .com.redhat.ceylon.compiler.java.Util.isReified(exception$6, .com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor.klass(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric.class, .ceylon.language.Integer.$TypeDescriptor$))) {
                 final .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.Integer> e = (.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric<.ceylon.language.Integer>)(.com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionGeneric)exception$6;
                 .ceylon.language.print_.print(.ceylon.language.String.instance("Caught ExceptionGeneric<Integer>"));
             } else if (exception$6 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.ExceptionSub && exception$6 instanceof .com.redhat.ceylon.compiler.java.test.statement.trycatch.Intersect) {

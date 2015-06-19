@@ -83,7 +83,8 @@ public class MethodOrValueReferenceVisitor extends Visitor {
                 return;
             }
             TypedDeclaration d = (TypedDeclaration) decl;
-            if (Decl.equal(d, declaration)) {
+            if (Decl.equal(d, declaration) || (d.isNativeHeader() && d.getOverloads().contains(declaration))) {
+                d = declaration;
                 if (Decl.isParameter(d)) {
                     // a reference from a default argument 
                     // expression of the same parameter 
@@ -95,8 +96,8 @@ public class MethodOrValueReferenceVisitor extends Visitor {
                     
                     // Accessing another instance's member passed to a class initializer
                     if (that instanceof Tree.QualifiedMemberExpression) {
-                        if (decl instanceof TypedDeclaration
-                                && ((TypedDeclaration)decl).getOtherInstanceAccess()) {
+                        if (d instanceof TypedDeclaration
+                                && ((TypedDeclaration)d).getOtherInstanceAccess()) {
                             ((FunctionOrValue)d).setCaptured(true);
                         }
                     }
@@ -104,7 +105,7 @@ public class MethodOrValueReferenceVisitor extends Visitor {
                     if (isCapturableMplParameter(d)) {
                         ((FunctionOrValue)d).setCaptured(true);
                     }
-                } else if (Decl.isValue(d) || Decl.isGetter(decl)) {
+                } else if (Decl.isValue(d) || Decl.isGetter(d)) {
                     Value v = (Value) d;
                     v.setCaptured(true);
                     if (Decl.isObjectValue(d)){
@@ -226,12 +227,13 @@ public class MethodOrValueReferenceVisitor extends Visitor {
             for (Tree.Statement stmt : that.getClassBody().getStatements()) {
                 if (stmt instanceof Tree.Constructor) {
                     Tree.Constructor ctor = (Tree.Constructor)stmt;
-                    if (ctor.getDelegatedConstructor() != null) {
+                    if (ctor.getDelegatedConstructor() != null
+                            && ctor.getDelegatedConstructor().getInvocationExpression() != null) {
                         if (ctor.getDelegatedConstructor().getInvocationExpression().getPrimary() instanceof Tree.ExtendedTypeExpression) {
                             Tree.ExtendedTypeExpression ete = (Tree.ExtendedTypeExpression)ctor.getDelegatedConstructor().getInvocationExpression().getPrimary();
-                            if (ete.getDeclaration() instanceof Constructor
-                                    && ete.getDeclaration().getContainer().equals(that.getDeclarationModel())) {
-                                    delegatedTo.put(ctor.getDeclarationModel(), (Constructor)ete.getDeclaration());
+                            if (Decl.isConstructor(ete.getDeclaration())
+                                    && Decl.getConstructedClass(ete.getDeclaration()).equals(that.getDeclarationModel())) {
+                                    delegatedTo.put(ctor.getConstructor(), Decl.getConstructor(ete.getDeclaration()));
                             }
                         }
                     }
@@ -239,8 +241,8 @@ public class MethodOrValueReferenceVisitor extends Visitor {
             }
             for (Tree.Statement stmt : that.getClassBody().getStatements()) {
             if (stmt instanceof Tree.Constructor &&
-                        (delegatedTo.containsKey(((Tree.Constructor)stmt).getDeclarationModel())
-                        || delegatedTo.containsValue(((Tree.Constructor)stmt).getDeclarationModel()))) {
+                        (delegatedTo.containsKey(Decl.getConstructor(((Tree.Constructor)stmt).getDeclarationModel()))
+                        || delegatedTo.containsValue(Decl.getConstructor(((Tree.Constructor)stmt).getDeclarationModel())))) {
                     boolean cs = enterCapturingScope();
                     stmt.visit(this);
                     exitCapturingScope(cs);

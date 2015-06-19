@@ -51,6 +51,7 @@ import com.redhat.ceylon.model.typechecker.model.ClassOrInterface;
 import com.redhat.ceylon.model.typechecker.model.Constructor;
 import com.redhat.ceylon.model.typechecker.model.Declaration;
 import com.redhat.ceylon.model.typechecker.model.Function;
+import com.redhat.ceylon.model.typechecker.model.FunctionOrValue;
 import com.redhat.ceylon.model.typechecker.model.Functional;
 import com.redhat.ceylon.model.typechecker.model.Interface;
 import com.redhat.ceylon.model.typechecker.model.Parameter;
@@ -238,7 +239,7 @@ abstract class Invocation {
         JCExpression actualPrimExpr;
         if (getPrimary() instanceof Tree.QualifiedTypeExpression
                 && ((Tree.QualifiedTypeExpression)getPrimary()).getPrimary() instanceof Tree.BaseTypeExpression
-                && !(getPrimaryDeclaration() instanceof Constructor)) {
+                && !Decl.isConstructor(getPrimaryDeclaration())) {
             actualPrimExpr = gen.naming.makeQualifiedThis(primaryExpr);
         } else {
             actualPrimExpr = primaryExpr;
@@ -267,19 +268,30 @@ abstract class Invocation {
                 // we must be invoking a member imported from an object
                 // in which case the qualifer is needed.
             }
-            if (declaration instanceof Constructor) {
+            if (Decl.isConstructor(declaration)) {
                 selector = null;
             }
-        } else if (getPrimary() instanceof Tree.QualifiedTypeExpression) {
-            Tree.QualifiedTypeExpression type = (Tree.QualifiedTypeExpression)getPrimary();
-            Declaration declaration = type.getDeclaration();
-            if (declaration instanceof Constructor 
-                    && Strategy.generateInstantiator(declaration)) {
-                if (Decl.withinInterface(Decl.getConstructedClass(declaration))) {
-                    actualPrimExpr = primaryExpr != null ? primaryExpr : gen.naming.makeQuotedThis();
+        } else {
+            
+            if (getPrimary() instanceof Tree.QualifiedMemberOrTypeExpression) {
+                Tree.QualifiedMemberOrTypeExpression type = (Tree.QualifiedMemberOrTypeExpression)getPrimary();
+                Declaration declaration = type.getDeclaration();
+                if (Decl.isConstructor(declaration)) {
+                    if (Decl.withinInterface(Decl.getConstructedClass(declaration))) {
+                        if (Strategy.generateInstantiator(declaration)) {
+                            actualPrimExpr = primaryExpr != null ? primaryExpr : gen.naming.makeQuotedThis();
+                        } else {
+                            actualPrimExpr = null;
+                        }
+                    }
+                }
+            } else if (getPrimary() instanceof Tree.BaseMemberOrTypeExpression) {
+                Tree.BaseMemberOrTypeExpression type = (Tree.BaseMemberOrTypeExpression)getPrimary();
+                Declaration declaration = type.getDeclaration();
+                if (Decl.isConstructor(declaration)) {
+                    selector = null;
                 }
             }
-        } else {
             if (isIndirect()) {
                 if (getPrimaryDeclaration() != null
                         && (Decl.isGetter(getPrimaryDeclaration())
@@ -369,6 +381,9 @@ abstract class Invocation {
 
     protected Constructor getConstructorFromPrimary(
             Declaration primaryDeclaration) {
+        if (Decl.isConstructor(primaryDeclaration)) {
+            primaryDeclaration = Decl.getConstructor(primaryDeclaration);
+        }
         if (primaryDeclaration instanceof Constructor) {
             return (Constructor)primaryDeclaration;
         } else if (primaryDeclaration instanceof ClassAlias) {
@@ -1293,7 +1308,7 @@ class NamedArgumentInvocation extends Invocation {
         case STATIC:
             break;
         case OUTER:
-            if(getQmePrimary() != null && getPrimaryDeclaration() instanceof Constructor == false)
+            if(getQmePrimary() != null && !Decl.isConstructor(getPrimaryDeclaration()))
                 thisExpr = callVarName.makeIdent();
             break;
         case OUTER_COMPANION:

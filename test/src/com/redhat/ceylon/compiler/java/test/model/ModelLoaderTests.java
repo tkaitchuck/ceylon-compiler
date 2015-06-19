@@ -366,7 +366,9 @@ public class ModelLoaderTests extends CompilerTests {
             if(validDeclaration instanceof ClassOrInterface){
                 Assert.assertTrue(name+" [ClassOrInterface]", modelDeclaration instanceof ClassOrInterface);
                 compareClassOrInterfaceDeclarations((ClassOrInterface)validDeclaration, (ClassOrInterface)modelDeclaration);
-            }else if(validDeclaration instanceof Function){
+            } else if(Decl.isConstructor(validDeclaration)){
+                Assert.assertTrue(name+" [Constructor]", Decl.isConstructor(modelDeclaration));
+            } else if(validDeclaration instanceof Function){
                 Assert.assertTrue(name+" [Method]", modelDeclaration instanceof Function);
                 compareMethodDeclarations((Function)validDeclaration, (Function)modelDeclaration);
             }else if(validDeclaration instanceof Value || validDeclaration instanceof Setter){
@@ -519,7 +521,7 @@ public class ModelLoaderTests extends CompilerTests {
                 if(!validMember.isShared())
                     continue;
                 Declaration modelMember = lookupMember(modelDeclaration, validMember);
-                Assert.assertNotNull(validMember.getClass().getSimpleName() + " " + validMember.getQualifiedNameString()+" [member] not found in loaded model", modelMember);
+                Assert.assertNotNull(validMember.getClass().getSimpleName() + " " + validMember.getQualifiedNameString()+" ["+validMember.getDeclarationKind()+"] not found in loaded model", modelMember);
                 compareDeclarations(modelMember.getQualifiedNameString(), validMember, modelMember);
             }
             // and not more
@@ -565,12 +567,14 @@ public class ModelLoaderTests extends CompilerTests {
         private Declaration lookupMember(ClassOrInterface container, Declaration referenceMember) {
             String name = referenceMember.getName();
             for(Declaration member : container.getMembers()){
+                if ((referenceMember instanceof Constructor && member instanceof FunctionOrValue)
+                        || (referenceMember instanceof FunctionOrValue && member instanceof Constructor)) {
+                    continue;
+                }
                 if (name == null 
-                        && referenceMember instanceof Constructor 
                         && member.getName() == null) {
                     return member;
-                }
-                if(member.getName() != null 
+                } else if(member.getName() != null 
                         && member.getName().equals(name)){
                     // we have a special case if we're asking for a Value and we find a Class, it means it's an "object"'s
                     // class with the same name so we ignore it
@@ -1101,6 +1105,11 @@ public class ModelLoaderTests extends CompilerTests {
     public void loadClassWithAttributeAndConflictingMethods(){
         verifyCompilerClassLoading("KlassWithAttributeAndConflictingMethods.ceylon");
     }
+    
+    @Test
+    public void loadClassSingletonConstructors(){
+        verifyCompilerClassLoading("SingletonConstructors.ceylon");
+    }
 
     @Test
     public void loadTypeParameters(){
@@ -1442,7 +1451,7 @@ public class ModelLoaderTests extends CompilerTests {
         assertErrors("bogusTopLevelClassUser",
                 new CompilerError(-1, "Constructor for 'com.redhat.ceylon.compiler.java.test.model.BogusTopLevelClass' should take 1 reified type arguments (TypeDescriptor) but has '0': skipping constructor."),
                 new CompilerError(-1, "Invalid type signature for self type of com.redhat.ceylon.compiler.java.test.model::BogusTopLevelClass: com.redhat.ceylon.compiler.java.test.model::MissingType is not a type parameter"),
-
+                new CompilerError(2, "Error while loading the com.redhat.ceylon.compiler.java.test.model/1 module:\n   Error while resolving type of extended type for com.redhat.ceylon.compiler.java.test.model::BogusTopLevelClass:\n   Could not find type 'com.redhat.ceylon.compiler.java.test.model.MissingType'"),
                 // FIXME: I wish I knew how to get rid of that one...
                 new CompilerError(3, "constructor BogusTopLevelClass in class com.redhat.ceylon.compiler.java.test.model.BogusTopLevelClass<T> cannot be applied to given types;\n  required: no arguments\n  found: com.redhat.ceylon.compiler.java.runtime.model.TypeDescriptor\n  reason: actual and formal argument lists differ in length")
         );

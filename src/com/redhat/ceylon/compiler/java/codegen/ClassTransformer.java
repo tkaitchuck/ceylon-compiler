@@ -32,6 +32,7 @@ import static com.sun.tools.javac.code.Flags.STATIC;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,6 +57,7 @@ import com.redhat.ceylon.compiler.typechecker.tree.Tree.AttributeDeclaration;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.AttributeGetterDefinition;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.AttributeSetterDefinition;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.BaseMemberExpression;
+import com.redhat.ceylon.compiler.typechecker.tree.Tree.FunctionArgument;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.LazySpecifierExpression;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.MethodDeclaration;
 import com.redhat.ceylon.compiler.typechecker.tree.Tree.SequencedArgument;
@@ -112,12 +114,18 @@ import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
-import com.sun.tools.javac.util.Name;
 
 /**
  * This transformer deals with class/interface declarations
  */
 public class ClassTransformer extends AbstractTransformer {
+
+    private static final Comparator<Declaration> DeclarationComparator = new Comparator<Declaration>(){
+        @Override
+        public int compare(Declaration a, Declaration b) {
+            return a.getQualifiedNameString().compareTo(b.getQualifiedNameString());
+        }
+    };
 
     public static ClassTransformer getInstance(Context context) {
         ClassTransformer trans = context.get(ClassTransformer.class);
@@ -148,7 +156,7 @@ public class ClassTransformer extends AbstractTransformer {
         if (def instanceof Tree.AnyInterface) {
             javaClassName = naming.makeTypeDeclarationName(model, QUALIFIED).replaceFirst(".*\\.", "");
         } else {
-            javaClassName = Naming.quoteClassName(def.getIdentifier().getText());
+            javaClassName = Naming.quoteClassDefinitionName(ceylonClassName, model.isNativeHeader());
         }
         ClassDefinitionBuilder instantiatorImplCb;
         ClassDefinitionBuilder instantiatorDeclCb;
@@ -178,7 +186,8 @@ public class ClassTransformer extends AbstractTransformer {
                 classBuilder.getInitBuilder().userAnnotations(expressionGen().transformAnnotations(false, OutputElement.CONSTRUCTOR, def));
             }
             if(generateInstantiator
-                    && !cls.hasConstructors()){
+                    && !cls.hasConstructors()
+                    && !cls.hasEnumerated()){
                 classBuilder.getInitBuilder().modifiers(PROTECTED);
                 generateInstantiators(classBuilder, cls, null, instantiatorDeclCb, instantiatorImplCb, classDef, classDef.getParameterList());
             }
@@ -226,8 +235,8 @@ public class ClassTransformer extends AbstractTransformer {
             .caseTypes(model.getCaseTypes(), model.getSelfType())
             .defs((List)childDefs);
         
-        // aliases don't need a $getType method
-        if(!model.isAlias()){
+        // aliases and native headers don't need a $getType method
+        if(!model.isAlias() && !model.isNativeHeader()){
             // only classes get a $getType method
             if(model instanceof Class)
                 classBuilder.addGetTypeMethod(model.getType());
@@ -944,6 +953,9 @@ public class ClassTransformer extends AbstractTransformer {
             Class cls, Constructor ctor, ClassDefinitionBuilder instantiatorDeclCb, 
             ClassDefinitionBuilder instantiatorImplCb, Tree.Declaration node, Tree.ParameterList pl) {
         // TODO Instantiators on companion classes
+        if (Decl.isEnumeratedConstructor(ctor)) {
+            return;
+        }
         ParameterList parameterList = ctor != null ? ctor.getFirstParameterList() : cls.getParameterList();
         if (Decl.withinInterface(cls)) {
             DefaultedArgumentOverload overloaded = new DefaultedArgumentInstantiator(daoAbstract, cls, ctor, instantiatorDeclCb.isCompanionBuilder());
@@ -1052,7 +1064,7 @@ public class ClassTransformer extends AbstractTransformer {
             pdb.userAnnotations(expressionGen().transformAnnotations(p instanceof Tree.ParameterDeclaration
                     && !(param.getModel().isShared() || param.getModel().isCaptured()), OutputElement.PARAMETER, member));
         } else if (p instanceof Tree.ParameterDeclaration &&
-                param.getDeclaration() instanceof Constructor) {
+                Decl.isConstructor(param.getDeclaration())) {
             pdb.userAnnotations(expressionGen().transformAnnotations(true, OutputElement.PARAMETER, ((Tree.ParameterDeclaration)p).getTypedDeclaration()));
         }
 
@@ -2094,19 +2106,25 @@ public class ClassTransformer extends AbstractTransformer {
             for(Type interfaceDecl : model.getSatisfiedTypes()){
                 collectInterfaces((Interface) interfaceDecl.getDeclaration(), satisfiedInterfaces);
             }
-            // now see if we refined them
-            for(Interface iface : satisfiedInterfaces){
-                // skip those we can't do anything about
-                if(!supportsReified(iface) || !CodegenUtil.isCompanionClassNeeded(iface))
-                    continue;
-                Type thisType = model.getType().getSupertype(iface);
-                Type superClassType = model.getExtendedType().getSupertype(iface);
-                if(thisType != null
-                        && superClassType != null
-                        && !thisType.isExactly(superClassType)
-                        && thisType.isSubtypeOf(superClassType)){
-                    // we're refining it
-                    classBuilder.refineReifiedType(thisType);
+            if(!satisfiedInterfaces.isEmpty()){
+                // sort it to facilitate test comparisons that work in JDK7 and 8
+                ArrayList<Interface> sortedInterfaces = new ArrayList<Interface>(satisfiedInterfaces.size());
+                sortedInterfaces.addAll(satisfiedInterfaces);
+                Collections.sort(sortedInterfaces, DeclarationComparator);
+                // now see if we refined them
+                for(Interface iface : sortedInterfaces){
+                    // skip those we can't do anything about
+                    if(!supportsReified(iface) || !CodegenUtil.isCompanionClassNeeded(iface))
+                        continue;
+                    Type thisType = model.getType().getSupertype(iface);
+                    Type superClassType = model.getExtendedType().getSupertype(iface);
+                    if(thisType != null
+                            && superClassType != null
+                            && !thisType.isExactly(superClassType)
+                            && thisType.isSubtypeOf(superClassType)){
+                        // we're refining it
+                        classBuilder.refineReifiedType(thisType);
+                    }
                 }
             }
         }
@@ -2848,7 +2866,19 @@ public class ClassTransformer extends AbstractTransformer {
 
                 java.util.List<Tree.ParameterList> parameterListTrees = null;
                 if(op.getBaseMemberExpression() instanceof Tree.ParameterizedExpression){
-                    parameterListTrees = ((Tree.ParameterizedExpression)op.getBaseMemberExpression()).getParameterLists();
+                    parameterListTrees = new ArrayList<>(m.getParameterLists().size());
+                    parameterListTrees.addAll(((Tree.ParameterizedExpression)op.getBaseMemberExpression()).getParameterLists());
+                    Tree.Term term = specifierExpression.getExpression().getTerm();
+                    // mpl refined by single pl with anonymous functions
+                    // we bring each anonymous function pl up to the mpl method
+                    // and give it the given block of expr as it's specifier
+                    while (term instanceof Tree.FunctionArgument
+                            && m.getParameterLists().size() > 1) {
+                        FunctionArgument functionArgument = (Tree.FunctionArgument)term;
+                        specifierExpression.setExpression(functionArgument.getExpression());
+                        parameterListTrees.addAll(functionArgument.getParameterLists());
+                        term = functionArgument.getExpression().getTerm();
+                    }
                 }
 
                 int plIndex = 0;
@@ -3101,7 +3131,7 @@ public class ClassTransformer extends AbstractTransformer {
 
         result |= transformDeclarationSharedFlags(cdecl);
         // aliases cannot be abstract, especially since they're just placeholders
-        result |= (cdecl instanceof Class) && (cdecl.isAbstract() || cdecl.isFormal()) && !cdecl.isAlias() ? ABSTRACT : 0;
+        result |= (cdecl instanceof Class) && (cdecl.isAbstract() || cdecl.isFormal() || cdecl.isNativeHeader()) && !cdecl.isAlias() ? ABSTRACT : 0;
         result |= (cdecl instanceof Interface) ? INTERFACE : 0;
         // aliases are always final placeholders, final classes are also final
         result |= (cdecl instanceof Class) && (cdecl.isAlias() || cdecl.isFinal())  ? FINAL : 0;
@@ -3188,7 +3218,7 @@ public class ClassTransformer extends AbstractTransformer {
     private int transformObjectDeclFlags(Value cdecl) {
         int result = 0;
 
-        result |= FINAL;
+        result |= cdecl.isNativeHeader() ? ABSTRACT : FINAL;
         result |= !Decl.isAncestorLocal(cdecl) && Decl.isShared(cdecl) ? PUBLIC : 0;
 
         return result;
@@ -4783,13 +4813,16 @@ public class ClassTransformer extends AbstractTransformer {
         naming.clearSubstitutions(klass);
         
         String name = klass.getName();
+        String javaClassName = Naming.quoteClassDefinitionName(name, model != null && model.isNativeHeader());
         ClassDefinitionBuilder objectClassBuilder = ClassDefinitionBuilder.object(
-                this, name, Decl.isLocal(klass)).forDefinition(klass);
+                this, javaClassName, name, Decl.isLocal(klass)).forDefinition(klass);
         
         // Make sure top types satisfy reified type
-        addReifiedTypeInterface(objectClassBuilder, klass);
-        if(supportsReifiedAlias(klass))
-            objectClassBuilder.reifiedAlias(klass.getType());
+        if (model == null || !model.isNativeHeader()) {
+            addReifiedTypeInterface(objectClassBuilder, klass);
+            if(supportsReifiedAlias(klass))
+                objectClassBuilder.reifiedAlias(klass.getType());
+        }
         
         CeylonVisitor visitor = gen().visitor;
         final ListBuffer<JCTree> prevDefs = visitor.defs;
@@ -4815,7 +4848,8 @@ public class ClassTransformer extends AbstractTransformer {
         
         if (model != null
                 && Decl.isToplevel(model)
-                && def instanceof Tree.ObjectDefinition) {
+                && def instanceof Tree.ObjectDefinition
+                && !model.isNativeHeader()) {
             // generate a field and getter
             AttributeDefinitionBuilder builder = AttributeDefinitionBuilder
                     // TODO attr build take a JCExpression className
@@ -4840,12 +4874,14 @@ public class ClassTransformer extends AbstractTransformer {
         // make sure we set the container in case we move it out
         addAtContainer(objectClassBuilder, klass);
 
-        objectClassBuilder.getInitBuilder().modifiers(PRIVATE);
         objectClassBuilder
             .annotations(makeAtObject())
             .satisfies(klass.getSatisfiedTypes())
-            .defs((List)childDefs)
-            .addGetTypeMethod(klass.getType());
+            .defs((List)childDefs);
+        if (model == null || !model.isNativeHeader()) {
+            objectClassBuilder.getInitBuilder().modifiers(PRIVATE);
+            objectClassBuilder.addGetTypeMethod(klass.getType());
+        }
         
         if(model != null)
             objectClassBuilder
@@ -4854,37 +4890,39 @@ public class ClassTransformer extends AbstractTransformer {
         
         List<JCTree> result = objectClassBuilder.build();
         
-        if (makeLocalInstance) {
-            if(model.isSelfCaptured()){
-                // if it's captured we need to box it and define the var before the class, so it can access it
-                JCNewClass newInstance = makeNewClass(objectClassBuilder.getClassName(), false, null);
-                JCFieldAccess setter = naming.makeSelect(Naming.getLocalValueName(model), Naming.getSetterName(model));
-                JCStatement assign = make().Exec(make().Assign(setter, newInstance));
-                result = result.prepend(assign);
-
-                JCVariableDecl localDecl = makeVariableBoxDecl(null, model);
-                result = result.prepend(localDecl);
-            }else{
-                // not captured, we can define the var after the class
-                JCVariableDecl localDecl = makeLocalIdentityInstance(name, objectClassBuilder.getClassName(), false);
-                result = result.append(localDecl);
-            }
-            
-        } else if (model != null && Decl.withinClassOrInterface(model)) {
-            boolean visible = Decl.isCaptured(model);
-            int modifiers = FINAL | ((visible) ? PRIVATE : 0);
-            JCExpression type = makeJavaType(klass.getType());
-            JCExpression initialValue = makeNewClass(makeJavaType(klass.getType()), null);
-            containingClassBuilder.field(modifiers, name, type, initialValue, !visible);
-            
-            if (visible) {
-                AttributeDefinitionBuilder getter = AttributeDefinitionBuilder
-                .getter(this, name, model)
-                .modifiers(transformAttributeGetSetDeclFlags(model, false));
-                if (def instanceof Tree.ObjectDefinition) {
-                    getter.userAnnotations(expressionGen().transformAnnotations(true, OutputElement.GETTER, ((Tree.ObjectDefinition)def)));
+        if (model == null || !model.isNativeHeader()) {
+            if (makeLocalInstance) {
+                if(model.isSelfCaptured()){
+                    // if it's captured we need to box it and define the var before the class, so it can access it
+                    JCNewClass newInstance = makeNewClass(objectClassBuilder.getClassName(), false, null);
+                    JCFieldAccess setter = naming.makeSelect(Naming.getLocalValueName(model), Naming.getSetterName(model));
+                    JCStatement assign = make().Exec(make().Assign(setter, newInstance));
+                    result = result.prepend(assign);
+    
+                    JCVariableDecl localDecl = makeVariableBoxDecl(null, model);
+                    result = result.prepend(localDecl);
+                }else{
+                    // not captured, we can define the var after the class
+                    JCVariableDecl localDecl = makeLocalIdentityInstance(name, objectClassBuilder.getClassName(), false);
+                    result = result.append(localDecl);
                 }
-                result = result.appendList(getter.build());
+                
+            } else if (model != null && Decl.withinClassOrInterface(model)) {
+                boolean visible = Decl.isCaptured(model);
+                int modifiers = FINAL | ((visible) ? PRIVATE : 0);
+                JCExpression type = makeJavaType(klass.getType());
+                JCExpression initialValue = makeNewClass(makeJavaType(klass.getType()), null);
+                containingClassBuilder.field(modifiers, name, type, initialValue, !visible);
+                
+                if (visible) {
+                    AttributeDefinitionBuilder getter = AttributeDefinitionBuilder
+                    .getter(this, name, model)
+                    .modifiers(transformAttributeGetSetDeclFlags(model, false));
+                    if (def instanceof Tree.ObjectDefinition) {
+                        getter.userAnnotations(expressionGen().transformAnnotations(true, OutputElement.GETTER, ((Tree.ObjectDefinition)def)));
+                    }
+                    result = result.appendList(getter.build());
+                }
             }
         }
         
@@ -4997,7 +5035,10 @@ public class ClassTransformer extends AbstractTransformer {
      * @param declFlags
      * @return
      */
-    public List<JCTree> makeNamedConstructor(Tree.Constructor that, 
+    public List<JCTree> makeNamedConstructor(
+            Tree.Declaration that,
+            Tree.ParameterList parameterList,
+            Constructor ctor,
             ClassDefinitionBuilder classBuilder,
             boolean generateInstantiator,
             int mods,
@@ -5006,7 +5047,6 @@ public class ClassTransformer extends AbstractTransformer {
             List<JCStatement> ctorBody, 
             DeclNameFlag... declFlags) {
         ListBuffer<JCTree> result = ListBuffer.<JCTree>lb();
-        Constructor ctor = that.getDeclarationModel();
         Class clz = (Class)ctor.getContainer();
         
         at(that);
@@ -5022,7 +5062,7 @@ public class ClassTransformer extends AbstractTransformer {
                 decl = classBuilder.getContainingClassBuilder();
                 impl = classBuilder.getContainingClassBuilder();
             }
-            generateInstantiators(classBuilder, clz, ctor, decl, impl, that, that.getParameterList());
+            generateInstantiators(classBuilder, clz, ctor, decl, impl, that, parameterList);
         }
         
         ctorDb.userAnnotations(expressionGen().transformAnnotations(true, OutputElement.CONSTRUCTOR, that));
@@ -5030,6 +5070,9 @@ public class ClassTransformer extends AbstractTransformer {
             ctorDb.modelAnnotations(makeAtIgnore());
         } else if (!Decl.isDefaultConstructor(ctor)) {
             ctorDb.modelAnnotations(makeAtName(ctor.getName()));
+        }
+        if (Decl.isEnumeratedConstructor(ctor)) {
+            ctorDb.modelAnnotations(makeAtEnumerated());
         }
         
         ctorDb.modifiers(mods);
@@ -5046,8 +5089,10 @@ public class ClassTransformer extends AbstractTransformer {
             ctorDb.parameter(makeConstructorNameParameter(ctor, declFlags));
         }
         // Add the rest of the parameters (this worries about aliasing)
-        transformClassOrCtorParameters(null, (Class)ctor.getContainer(), ctor, that, that.getParameterList(), 
-                classBuilder, ctorDb, generateInstantiator, decl, impl);
+        if (parameterList != null) {
+            transformClassOrCtorParameters(null, (Class)ctor.getContainer(), ctor, that, parameterList, 
+                    classBuilder, ctorDb, generateInstantiator, decl, impl);
+        }
         
         // Transformation of body has to happen after transformation of parameter so we know about parameter aliasing.
         at(that);
@@ -5062,16 +5107,30 @@ public class ClassTransformer extends AbstractTransformer {
         ClassDefinitionBuilder constructorNameClass = ClassDefinitionBuilder.klass(this, 
                 ctorName, null, true);
         JCVariableDecl constructorNameConst;
-        if (clz.isToplevel() || 
-                (clz.isMember() && Decl.isToplevel((Declaration)clz.getContainer()))) {
-            classMods |= FINAL | STATIC;
-            constructorNameConst = make().VarDef(make().Modifiers(classMods, makeAtIgnore()),
-                    names().fromString(ctorName),
-                    naming.makeTypeDeclarationExpression(null, ctor, declFlags), 
-                    makeNull());
-        } else {
-            classMods &= ~(PRIVATE | PROTECTED | PUBLIC);
+        if (Decl.isEnumeratedConstructor(ctor)) {
+            if (clz.isToplevel()) {
+                classMods &= ~(PRIVATE | PROTECTED | PUBLIC);
+                classMods |= PRIVATE| STATIC | FINAL ;
+            } else if (clz.isMember()) {
+                classMods &= ~(PRIVATE | PROTECTED | PUBLIC);
+                classMods |= PRIVATE| STATIC | FINAL ;
+            } else {
+                classMods &= ~(PRIVATE | PROTECTED | PUBLIC);
+                classMods |= FINAL ;
+            }
             constructorNameConst = null;
+        } else {
+            if (clz.isToplevel() || 
+                    (clz.isMember() && Decl.isToplevel((Declaration)clz.getContainer()))) {
+                classMods |= STATIC | FINAL;
+                constructorNameConst = make().VarDef(make().Modifiers(classMods, makeAtIgnore()),
+                        names().fromString(ctorName),
+                        naming.makeTypeDeclarationExpression(null, ctor, declFlags), 
+                        makeNull());
+            } else {
+                classMods &= ~(PRIVATE | PROTECTED | PUBLIC);
+                constructorNameConst = null;
+            }
         }
         constructorNameClass.modifiers(classMods);
         constructorNameClass.annotations(makeAtIgnore());
@@ -5088,7 +5147,7 @@ public class ClassTransformer extends AbstractTransformer {
             classBuilder.getContainingClassBuilder().getCompanionBuilder(clz).defs(ctorNameClassDecl);
             classBuilder.getContainingClassBuilder().getCompanionBuilder(clz).defs(constructorNameConst);
         } else {
-            result.addAll(ctorNameClassDecl);
+            classBuilder.defs(ctorNameClassDecl);
         }
     }
 
